@@ -8,11 +8,11 @@
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("BlackShark Tray");
-    app.setQuitOnLastWindowClosed(false); // ayar penceresi kapaninca cikma
+    app.setQuitOnLastWindowClosed(false); // keep running when the settings window closes
 
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         QMessageBox::critical(nullptr, "BlackShark",
-                              "Sistem tepsisi bulunamadi.");
+                              "System tray is not available.");
         return 1;
     }
 

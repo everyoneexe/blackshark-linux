@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::device::Headset;
 use crate::protocol::{self as proto, EqPreset};
 
-/// Varsayilan config yolu: ~/.config/blackshark/config.toml
+/// Default configuration path: ~/.config/blackshark/config.toml
 pub fn default_path() -> PathBuf {
     if let Some(dirs) = directories::ProjectDirs::from("", "", "blackshark") {
         return dirs.config_dir().join("config.toml");
@@ -22,55 +22,59 @@ pub fn default_path() -> PathBuf {
     PathBuf::from("/etc/blackshark/config.toml")
 }
 
-/// Diskte saklanan tum ayarlar. Alanlarin hepsi opsiyonel:
-/// yalnizca kullanicinin ayarladiklari uygulanir.
+/// All settings persisted to disk. Every field is optional; only user-configured
+/// values are applied.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// EQ preset adi: default | game | movie | music
+    /// EQ preset name: default | game | movie | music.
     pub eq_preset: Option<String>,
-    /// Custom EQ, 10 bant dB (-6..6). eq_preset ile birlikte verilirse
-    /// bu custom EQ uygulanir (preset'ten sonra).
+    /// Custom EQ, 10 dB bands (-6..6). When set with eq_preset, this custom EQ
+    /// is applied after the preset.
     pub eq: Option<Vec<i8>>,
-    /// Sidetone seviyesi 0..15
+    /// Sidetone level, 0..15.
     pub sidetone: Option<u8>,
     /// Mic noise cancellation
     pub noise_cancel: Option<bool>,
-    /// Uyku zamanlayicisi (dakika)
+    /// Sleep timer in minutes.
     pub sleep_minutes: Option<u16>,
-    /// Guc tasarrufu
+    /// Power saving.
     pub power_save: Option<bool>,
 }
 
 impl Config {
-    /// Verilen yoldan yukler; dosya yoksa bos config doner.
+    /// Loads from the specified path; returns an empty configuration if absent.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let text = fs::read_to_string(path)
-            .with_context(|| format!("config okunamadi: {}", path.display()))?;
+            .with_context(|| format!("could not read configuration: {}", path.display()))?;
         let cfg: Config = toml::from_str(&text)
-            .with_context(|| format!("config parse edilemedi: {}", path.display()))?;
+            .with_context(|| format!("could not parse configuration: {}", path.display()))?;
         Ok(cfg)
     }
 
-    /// Atomik olarak diske yazar (once .tmp'ye, sonra rename).
+    /// Writes atomically to disk (first to .tmp, then renames it).
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)
-                .with_context(|| format!("dizin olusturulamadi: {}", dir.display()))?;
+                .with_context(|| format!("could not create directory: {}", dir.display()))?;
         }
-        let text = toml::to_string_pretty(self).context("config serialize edilemedi")?;
+        let text = toml::to_string_pretty(self).context("could not serialize configuration")?;
         let tmp = tmp_path(path);
         fs::write(&tmp, text.as_bytes())
-            .with_context(|| format!("config yazilamadi: {}", tmp.display()))?;
-        fs::rename(&tmp, path)
-            .with_context(|| format!("config tasinamadi: {}", path.display()))?;
+            .with_context(|| format!("could not write configuration: {}", tmp.display()))?;
+        fs::rename(&tmp, path).with_context(|| {
+            format!(
+                "could not move configuration into place: {}",
+                path.display()
+            )
+        })?;
         Ok(())
     }
 
-    /// Config'teki tum ayarlari cihaza uygular.
+    /// Applies every saved setting to the device.
     pub fn apply(&self, hs: &Headset) -> Result<()> {
         let tid = 0x00;
 

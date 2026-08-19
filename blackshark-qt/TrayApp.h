@@ -7,9 +7,8 @@
 
 class SettingsWindow;
 
-// Sistem tepsisi. Duz kulaklik ikonu; tiklayinca menu acilir.
-// Referans (RiskRunner0/blackshark-linux) tray'ine benzer: batarya %,
-// hizli toggle'lar, EQ/sidetone alt menuleri.
+// System tray application. Uses a plain headset icon and opens its menu on click.
+// Provides battery percentage, quick toggles, and EQ/sidetone submenus.
 class TrayApp : public QObject {
     Q_OBJECT
 public:
@@ -27,6 +26,6 @@ private:
     HeadsetClient* m_client;
     QSystemTrayIcon* m_tray;
     QMenu* m_menu;
-    QAction* m_batteryAction; // menuda batarya gosterimi
+    QAction* m_batteryAction; // battery display in the menu
     SettingsWindow* m_settings = nullptr;
 };

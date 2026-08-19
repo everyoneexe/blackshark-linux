@@ -6,13 +6,13 @@
 HeadsetClient::HeadsetClient(QObject* parent)
     : QObject(parent),
       m_iface(SERVICE, PATH, IFACE, QDBusConnection::sessionBus(), this) {
-    // PropertiesChanged sinyalini dinle (org.freedesktop.DBus.Properties).
+    // Listen for the PropertiesChanged signal (org.freedesktop.DBus.Properties).
     QDBusConnection::sessionBus().connect(
         SERVICE, PATH, "org.freedesktop.DBus.Properties",
         "PropertiesChanged", this,
         SLOT(onPropertiesChanged(QString, QVariantMap, QStringList)));
 
-    // Ilk degerleri cek.
+    // Read the initial values.
     QVariant b = m_iface.property("Battery");
     if (b.isValid()) m_battery = b.toInt();
     QVariant c = m_iface.property("Connected");
@@ -28,7 +28,7 @@ void HeadsetClient::setEqPreset(const QString& name) {
 
 void HeadsetClient::setEq(const QList<int>& bands) {
     QList<QVariant> vlist;
-    // D-Bus imzasi ai (array of int32)
+    // D-Bus signature: ai (array of int32).
     QVariantList arr;
     for (int b : bands) arr << b;
     m_iface.call("SetEq", QVariant::fromValue(arr));

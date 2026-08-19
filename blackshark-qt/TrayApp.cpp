@@ -14,7 +14,7 @@ TrayApp::TrayApp(HeadsetClient* client, QObject* parent)
     : QObject(parent), m_client(client) {
     m_tray = new QSystemTrayIcon(this);
 
-    // Duz kulaklik ikonu. Once tema ikonu, yoksa gomulu SVG kaynagi.
+    // Plain headset icon. Prefer the theme icon, then fall back to the embedded SVG.
     QIcon icon = QIcon::fromTheme("audio-headset");
     if (icon.isNull()) {
         icon = QIcon(":/assets/headset.svg");
@@ -26,7 +26,7 @@ TrayApp::TrayApp(HeadsetClient* client, QObject* parent)
     updateTooltip();
     m_tray->show();
 
-    // Sol tik ile de ayarlar acilsin.
+    // Open Settings on left click as well.
     connect(m_tray, &QSystemTrayIcon::activated, this,
             [this](QSystemTrayIcon::ActivationReason reason) {
                 if (reason == QSystemTrayIcon::Trigger) openSettings();
@@ -41,12 +41,12 @@ TrayApp::TrayApp(HeadsetClient* client, QObject* parent)
 void TrayApp::buildMenu() {
     m_menu = new QMenu();
 
-    // Batarya gosterimi (tiklanamaz baslik)
-    m_batteryAction = m_menu->addAction("Batarya: ...");
+    // Battery display (non-clickable heading).
+    m_batteryAction = m_menu->addAction("Battery: ...");
     m_batteryAction->setEnabled(false);
     m_menu->addSeparator();
 
-    // --- EQ preset alt menusu ---
+    // --- EQ preset submenu ---
     QMenu* eqMenu = m_menu->addMenu("EQ Preset");
     auto* eqGroup = new QActionGroup(this);
     eqGroup->setExclusive(true);
@@ -60,19 +60,19 @@ void TrayApp::buildMenu() {
         });
     }
 
-    // --- Sidetone alt menusu (slider gomulu) ---
+    // --- Sidetone submenu (embedded slider) ---
     QMenu* sideMenu = m_menu->addMenu("Sidetone");
     {
         auto* w = new QWidget();
         auto* lay = new QVBoxLayout(w);
         lay->setContentsMargins(8, 4, 8, 4);
-        auto* lbl = new QLabel("Seviye: 0", w);
+        auto* lbl = new QLabel("Level: 0", w);
         auto* slider = new QSlider(Qt::Horizontal, w);
         slider->setRange(0, 15);
         lay->addWidget(lbl);
         lay->addWidget(slider);
         connect(slider, &QSlider::valueChanged, w,
-                [lbl](int v) { lbl->setText(QString("Seviye: %1").arg(v)); });
+                [lbl](int v) { lbl->setText(QString("Level: %1").arg(v)); });
         connect(slider, &QSlider::sliderReleased, this,
                 [this, slider]() { m_client->setSidetone(slider->value()); });
         auto* wa = new QWidgetAction(this);
@@ -81,23 +81,23 @@ void TrayApp::buildMenu() {
     }
 
     // --- Noise cancellation toggle ---
-    QAction* nc = m_menu->addAction("Gurultu engelleme");
+    QAction* nc = m_menu->addAction("Noise cancellation");
     nc->setCheckable(true);
     connect(nc, &QAction::toggled, this,
             [this](bool on) { m_client->setNoiseCancel(on); });
 
     // --- Power save toggle ---
-    QAction* ps = m_menu->addAction("Guc tasarrufu");
+    QAction* ps = m_menu->addAction("Power saving");
     ps->setCheckable(true);
     connect(ps, &QAction::toggled, this,
             [this](bool on) { m_client->setPowerSave(on); });
 
-    // --- Uyku alt menusu ---
-    QMenu* sleepMenu = m_menu->addMenu("Uyku");
+    // --- Sleep submenu ---
+    QMenu* sleepMenu = m_menu->addMenu("Sleep");
     auto* sleepGroup = new QActionGroup(this);
     sleepGroup->setExclusive(true);
     const QList<QPair<QString, int>> sleeps = {
-        {"Kapali", 0}, {"15 dk", 15}, {"30 dk", 30}, {"45 dk", 45}, {"60 dk", 60}};
+        {"Off", 0}, {"15 min", 15}, {"30 min", 30}, {"45 min", 45}, {"60 min", 60}};
     for (const auto& s : sleeps) {
         QAction* a = sleepMenu->addAction(s.first);
         a->setCheckable(true);
@@ -108,15 +108,15 @@ void TrayApp::buildMenu() {
     }
 
     m_menu->addSeparator();
-    QAction* settings = m_menu->addAction("Ayarlar...");
+    QAction* settings = m_menu->addAction("Settings...");
     connect(settings, &QAction::triggered, this, &TrayApp::openSettings);
 
-    QAction* refresh = m_menu->addAction("Bataryayi yenile");
+    QAction* refresh = m_menu->addAction("Refresh battery");
     connect(refresh, &QAction::triggered, this,
             [this]() { m_client->refreshBattery(); });
 
     m_menu->addSeparator();
-    QAction* quit = m_menu->addAction("Cikis");
+    QAction* quit = m_menu->addAction("Quit");
     connect(quit, &QAction::triggered, qApp, &QApplication::quit);
 }
 
@@ -133,10 +133,10 @@ void TrayApp::updateTooltip() {
     int b = m_client->battery();
     bool c = m_client->connected();
     QString batt = (b >= 0) ? QString("%%1").arg(b) : "?";
-    m_tray->setToolTip(QString("BlackShark V3 X\n%1  |  Batarya: %2")
-                           .arg(c ? "Bagli" : "Bagli degil", batt));
+    m_tray->setToolTip(QString("BlackShark V3 X\n%1  |  Battery: %2")
+                           .arg(c ? "Connected" : "Disconnected", batt));
     m_batteryAction->setText(
-        c ? QString("Batarya: %1").arg(batt) : QString("Bagli degil"));
+        c ? QString("Battery: %1").arg(batt) : QString("Disconnected"));
 }
 
 void TrayApp::onBatteryChanged(int) { updateTooltip(); }

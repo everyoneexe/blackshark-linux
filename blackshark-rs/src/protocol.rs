@@ -1,13 +1,13 @@
-//! Razer BlackShark V3 X HyperSpeed (Xbox) HID protokolu.
+//! Razer BlackShark V3 X HyperSpeed (Xbox) HID protocol.
 //!
-//! Synapse'in USB HID trafigi reverse-engineer edilerek cikarilmistir.
-//! Tum komutlar Synapse'in gonderdikleriyle byte-byte dogrulanmistir.
+//! Derived by reverse-engineering Synapse USB HID traffic.
+//! Every command was verified byte-for-byte against Synapse traffic.
 //!
-//! Report yapisi (64 byte):
+//! Report layout (64 bytes):
 //! ```text
 //!  [0]   report_id      = 0x07
 //!  [1]   status         = 0x00
-//!  [2]   transaction_id (artan sayac; cihaz umursamiyor, 0 da kabul)
+//!  [2]   transaction_id (incrementing counter; device also accepts 0)
 //!  [3]   0x00
 //!  [4]   0x00
 //!  [5]   0x00
@@ -32,7 +32,7 @@ fn crc(report: &[u8; REPORT_LEN]) -> u8 {
     c
 }
 
-/// Bir Razer HID report'u olusturur ve CRC'sini yerlestirir.
+/// Builds a Razer HID report and inserts its CRC.
 pub fn build_report(
     data_size: u8,
     cmd_class: u8,
@@ -55,7 +55,7 @@ pub fn build_report(
     r
 }
 
-/// EQ bant dB degerini (-6..+6) cihaz byte'ina cevirir (signed-magnitude).
+/// Converts an EQ band dB value (-6..+6) to the device byte (signed magnitude).
 /// 0dB=0x00, +N=N, -N=0x80|N
 pub fn signed_db_to_byte(db: i8) -> u8 {
     let db = db.clamp(-6, 6);
@@ -66,7 +66,7 @@ pub fn signed_db_to_byte(db: i8) -> u8 {
     }
 }
 
-/// EQ preset degerleri (command_class=0x18, command_id=0x00).
+/// EQ preset values (command_class=0x18, command_id=0x00).
 #[derive(Clone, Copy, Debug)]
 pub enum EqPreset {
     Default = 0x00,
@@ -87,16 +87,16 @@ impl EqPreset {
     }
 }
 
-// ---- Komut olusturucular ----
+// ---- Command builders ----
 
 pub fn eq_preset(p: EqPreset, tid: u8) -> [u8; REPORT_LEN] {
     // args: 00 01 00 <preset>
     build_report(0x04, 0x18, 0x00, &[0x00, 0x01, 0x00, p as u8], tid)
 }
 
-/// 10 bant, sira: 31,63,125,250,500,1k,2k,4k,8k,16k. dB araligi -6..+6.
+/// 10 bands ordered as 31, 63, 125, 250, 500, 1k, 2k, 4k, 8k, 16k; dB range -6..+6.
 pub fn eq_custom(bands: &[i8; 10], tid: u8) -> [u8; REPORT_LEN] {
-    let mut args = vec![0x00u8, 0x01u8]; // sabit prefix (byte[9..10])
+    let mut args = vec![0x00u8, 0x01u8]; // fixed prefix (byte[9..10])
     for &b in bands {
         args.push(signed_db_to_byte(b));
     }
@@ -116,7 +116,7 @@ pub fn noise_cancel(on: bool, tid: u8) -> [u8; REPORT_LEN] {
     build_report(0x02, 0x18, 0x0F, &[0x00, on as u8], tid)
 }
 
-/// Sleep timer, dakika (cihaza big-endian saniye olarak gider).
+/// Sleep timer in minutes (sent to the device as big-endian seconds).
 pub fn sleep_timer(minutes: u16, tid: u8) -> [u8; REPORT_LEN] {
     let secs = minutes.saturating_mul(60);
     let hi = (secs >> 8) as u8;
@@ -130,15 +130,15 @@ pub fn power_save(on: bool, tid: u8) -> [u8; REPORT_LEN] {
     build_report(0x02, 0x07, 0x08, &[0x00, on as u8], tid)
 }
 
-/// Batarya seviyesi sorgusu (GET). Cevapta byte[9] = yuzde.
+/// Battery-level query (GET). Response byte[10] is the percentage.
 pub fn battery_query(tid: u8) -> [u8; REPORT_LEN] {
     build_report(0x02, 0x07, 0x80, &[0x00], tid)
 }
 
-/// Batarya cevabindan yuzdeyi cikarir.
+/// Extracts the percentage from a battery response.
 pub fn parse_battery(resp: &[u8]) -> Option<u8> {
-    // Cevap yapisi: .. 02 07 80 00 VV -> report[9] = VV
-    resp.get(9).copied()
+    // Response layout: .. 02 07 80 00 VV -> report[10] = VV.
+    resp.get(10).copied()
 }
 
 #[cfg(test)]
@@ -149,7 +149,7 @@ mod tests {
         r.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
-    // Asagidaki beklenen degerler Synapse'ten yakalanan gercek paketlerdir.
+    // The expected values below are real packets captured from Synapse.
 
     #[test]
     fn test_eq_game() {
@@ -203,6 +203,17 @@ mod tests {
             hex(&r),
             "07000300000002078000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008500"
         );
+    }
+
+    #[test]
+    fn test_parse_battery() {
+        let mut response = [0u8; REPORT_LEN];
+        response[6] = 0x02;
+        response[7] = 0x07;
+        response[8] = 0x80;
+        response[9] = 0x00;
+        response[10] = 92;
+        assert_eq!(parse_battery(&response), Some(92));
     }
 
     #[test]

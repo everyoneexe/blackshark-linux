@@ -5,8 +5,8 @@
 #include <QtDBus/QDBusInterface>
 #include <QtDBus/QDBusConnection>
 
-// Daemon (net.blackshark1) icin D-Bus istemcisi.
-// Tray ve GUI bunu paylasir. HID'e dokunmaz; her sey daemon uzerinden gider.
+// D-Bus client for the net.blackshark1 daemon.
+// The tray and GUI share it. Neither touches HID directly; all requests use the daemon.
 class HeadsetClient : public QObject {
     Q_OBJECT
 public:
@@ -16,11 +16,11 @@ public:
 
     explicit HeadsetClient(QObject* parent = nullptr);
 
-    // Property'ler
+    // Properties.
     int battery() const;
     bool connected() const;
 
-    // Komutlar
+    // Commands.
     void setEqPreset(const QString& name);
     void setEq(const QList<int>& bands);
     void setSidetone(int level);
@@ -30,7 +30,7 @@ public:
     void refreshBattery();
 
 signals:
-    // Batarya/baglanti degisince yayilir (tray ve GUI dinler).
+    // Emitted when battery or connection state changes (the tray and GUI listen).
     void batteryChanged(int percent);
     void connectedChanged(bool connected);
 

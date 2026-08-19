@@ -148,3 +148,11 @@ cargo test        # verifies generated report bytes against real Synapse capture
 - Protocol: custom Razer HID (not HID++ or OpenRazer-compatible)
 
 See `PROTOCOL.md` for the full command reference.
+
+## Credits
+
+The D-Bus daemon/client layout was initially inspired by
+[RiskRunner0/blackshark-linux](https://github.com/RiskRunner0/blackshark-linux).
+This is an independent implementation for the BlackShark V3 X HyperSpeed (Xbox)
+(`1532:0A5B`); it has its own HID protocol implementation, device support, and
+release workflow.

@@ -1,11 +1,11 @@
-//! blacksharkd - HID sahipligini elinde tutan D-Bus daemon'i.
+//! blacksharkd - D-Bus daemon that exclusively owns the HID device.
 //!
-//! Mimari (referans: RiskRunner0/blackshark-linux'a benzer):
-//!   - Daemon /dev/hidraw* cihazini TEKELDE acar.
-//!   - net.blackshark1 D-Bus servisi sunar (session bus).
-//!   - Tray/GUI/CLI bu servise baglanir; kimse dogrudan HID'e dokunmaz.
-//!   - Bataryayi periyodik yoklar, degisince sinyal yayinlar.
-//!   - Ayar degisince config'e yazar; reconnect/boot'ta apply eder.
+//! Architecture:
+//!   - The daemon exclusively opens /dev/hidraw*.
+//!   - It exposes the net.blackshark1 D-Bus service on the session bus.
+//!   - The tray, GUI, and CLI connect to this service; none touch HID directly.
+//!   - It polls the battery periodically and emits a signal when it changes.
+//!   - It saves changed settings and reapplies them on reconnect and boot.
 //!
 //! D-Bus:
 //!   service : net.blackshark1
@@ -27,15 +27,15 @@ use config::Config;
 use device::Headset;
 use protocol::{self as proto, EqPreset};
 
-/// Batarya yoklama araligi.
-const BATTERY_POLL: Duration = Duration::from_secs(300); // 5 dk
+/// Battery polling interval.
+const BATTERY_POLL: Duration = Duration::from_secs(300); // 5 min
 
-/// Paylasilan daemon durumu.
+/// Shared daemon state.
 struct Inner {
     headset: Option<Headset>,
     config: Config,
     config_path: std::path::PathBuf,
-    battery: i32, // -1 = bilinmiyor
+    battery: i32, // -1 = unknown
     connected: bool,
 }
 
@@ -45,7 +45,7 @@ struct HeadsetService {
 }
 
 impl HeadsetService {
-    /// Cihaz yoksa acmayi dener; sonucu doner.
+    /// Tries to open the device if it is not already available.
     async fn ensure_device(&self) -> bool {
         let mut g = self.inner.lock().await;
         if g.headset.is_some() {
@@ -64,7 +64,7 @@ impl HeadsetService {
         }
     }
 
-    /// Cihaza komut gonderir; hata olursa cihazi dusurur (reconnect icin).
+    /// Sends a command to the device; drops it on failure so it can reconnect.
     async fn send(&self, report: &[u8; proto::REPORT_LEN]) -> Result<()> {
         let mut g = self.inner.lock().await;
         if let Some(hs) = g.headset.as_ref() {
@@ -77,7 +77,7 @@ impl HeadsetService {
                 }
             }
         }
-        Err(anyhow::anyhow!("cihaz bagli degil"))
+        Err(anyhow::anyhow!("device is not connected"))
     }
 
     async fn save_config(&self) {
@@ -88,13 +88,13 @@ impl HeadsetService {
 
 #[interface(name = "net.blackshark1.Headset")]
 impl HeadsetService {
-    /// Batarya yuzdesi (property). -1 = bilinmiyor.
+    /// Battery percentage property. -1 = unknown.
     #[zbus(property)]
     async fn battery(&self) -> i32 {
         self.inner.lock().await.battery
     }
 
-    /// Kulaklik bagli mi (property).
+    /// Whether the headset is connected.
     #[zbus(property)]
     async fn connected(&self) -> bool {
         self.inner.lock().await.connected
@@ -103,7 +103,7 @@ impl HeadsetService {
     /// EQ preset: "default" | "game" | "movie" | "music"
     async fn set_eq_preset(&self, name: String) -> zbus::fdo::Result<()> {
         let p = EqPreset::from_name(&name)
-            .ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("gecersiz preset: {name}")))?;
+            .ok_or_else(|| zbus::fdo::Error::InvalidArgs(format!("invalid preset: {name}")))?;
         self.send(&proto::eq_preset(p, 0))
             .await
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
@@ -116,10 +116,12 @@ impl HeadsetService {
         Ok(())
     }
 
-    /// Custom EQ: 10 bant dB (-6..6). sira 31..16k.
+    /// Custom EQ: 10 dB bands (-6..6), ordered from 31 Hz to 16 kHz.
     async fn set_eq(&self, bands: Vec<i32>) -> zbus::fdo::Result<()> {
         if bands.len() != 10 {
-            return Err(zbus::fdo::Error::InvalidArgs("10 bant gerekli".into()));
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "10 bands are required".into(),
+            ));
         }
         let mut arr = [0i8; 10];
         for (i, b) in bands.iter().enumerate() {
@@ -163,7 +165,7 @@ impl HeadsetService {
         Ok(())
     }
 
-    /// Sleep timer (dakika).
+    /// Sleep timer in minutes.
     async fn set_sleep(&self, minutes: u32) -> zbus::fdo::Result<()> {
         let m = minutes as u16;
         self.send(&proto::sleep_timer(m, 0))
@@ -190,10 +192,10 @@ impl HeadsetService {
         Ok(())
     }
 
-    /// Config'teki tum ayarlari cihaza yeniden uygula.
+    /// Reapply every saved configuration setting to the device.
     async fn apply(&self) -> zbus::fdo::Result<()> {
         if !self.ensure_device().await {
-            return Err(zbus::fdo::Error::Failed("cihaz bagli degil".into()));
+            return Err(zbus::fdo::Error::Failed("device is not connected".into()));
         }
         let g = self.inner.lock().await;
         if let Some(hs) = g.headset.as_ref() {
@@ -204,7 +206,7 @@ impl HeadsetService {
         Ok(())
     }
 
-    /// Bataryayi simdi oku (senkron).
+    /// Read the battery now, synchronously.
     async fn refresh_battery(&self) -> zbus::fdo::Result<i32> {
         if !self.ensure_device().await {
             return Ok(-1);
@@ -239,14 +241,14 @@ async fn main() -> Result<()> {
         inner: inner.clone(),
     };
 
-    // D-Bus session bus'a servisi yayinla.
+    // Publish the service on the D-Bus session bus.
     let conn = connection::Builder::session()?
         .name("net.blackshark1")?
         .serve_at("/net/blackshark1/Headset", service.clone())?
         .build()
         .await?;
 
-    // Baslangicta cihazi ac ve config'i uygula.
+    // Open the device and apply the configuration at startup.
     if service.ensure_device().await {
         let g = inner.lock().await;
         if let Some(hs) = g.headset.as_ref() {
@@ -254,7 +256,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Batarya polling gorevi.
+    // Battery polling task.
     let poll_service = service.clone();
     let iface_ref = conn
         .object_server()
@@ -273,7 +275,7 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            // Property changed sinyalleri (zbus 4.x)
+            // Property-changed signals (zbus 4.x).
             let ctxt = iface_ref.signal_context();
             let iface = iface_ref.get().await;
             let _ = iface.battery_changed(ctxt).await;
@@ -282,10 +284,10 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Ilk batarya okumasini hemen tetikle.
+    // Trigger the first battery read immediately.
     let _ = service.refresh_battery().await;
 
-    // Ctrl-C / SIGTERM'e kadar calis.
+    // Run until Ctrl-C or SIGTERM.
     tokio::signal::ctrl_c().await?;
     drop(conn);
     Ok(())

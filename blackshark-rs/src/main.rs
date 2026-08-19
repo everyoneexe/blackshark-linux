@@ -1,7 +1,7 @@
-//! blackshark - CLI istemci. Daemon'a (net.blackshark1) D-Bus ile baglanir.
+//! blackshark - CLI client that connects to the daemon over D-Bus.
 //!
-//! Daemon HID'i tekelde tutar; CLI dogrudan cihaza dokunmaz. Boylece
-//! tray/gui/cli ayni anda cakismadan calisir.
+//! The daemon exclusively owns the HID device; the CLI never touches it directly.
+//! This lets the tray, GUI, and CLI run at the same time without conflicts.
 
 use anyhow::{anyhow, Result};
 use clap::{Parser, Subcommand};
@@ -11,7 +11,7 @@ use zbus::Connection;
 #[command(
     name = "blackshark",
     version,
-    about = "Razer BlackShark V3 X HyperSpeed (Xbox) CLI (daemon uzerinden)"
+    about = "Razer BlackShark V3 X HyperSpeed (Xbox) CLI client"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -20,16 +20,16 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Durum: batarya + baglanti (--json ile makine-okunur)
+    /// Show battery and connection status; use --json for machine-readable output.
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// Batarya seviyesini oku
+    /// Read the battery level.
     Battery,
     /// EQ preset: default | game | movie | music
     EqPreset { name: String },
-    /// Custom EQ: 10 bant dB (-6..6). 31..16k
+    /// Custom EQ: 10 dB bands (-6..6), from 31 Hz to 16 kHz.
     Eq {
         #[arg(num_args = 10, value_name = "dB", allow_negative_numbers = true)]
         bands: Vec<i32>,
@@ -38,23 +38,23 @@ enum Command {
     Sidetone { level: u32 },
     /// Noise cancellation: on | off
     NoiseCancel { state: String },
-    /// Uyku zamanlayicisi (dakika)
+    /// Sleep timer in minutes.
     Sleep { minutes: u32 },
-    /// Guc tasarrufu: on | off
+    /// Power saving: on | off.
     PowerSave { state: String },
-    /// Kayitli config'i cihaza yeniden uygula
+    /// Reapply the saved configuration to the device.
     Apply,
 }
 
 fn parse_on_off(s: &str) -> Result<bool> {
     match s.to_lowercase().as_str() {
-        "on" | "1" | "true" | "ac" | "acik" => Ok(true),
-        "off" | "0" | "false" | "kapat" | "kapali" => Ok(false),
-        _ => Err(anyhow!("gecersiz deger '{}': on/off bekleniyor", s)),
+        "on" | "1" | "true" => Ok(true),
+        "off" | "0" | "false" => Ok(false),
+        _ => Err(anyhow!("invalid value '{}': expected on or off", s)),
     }
 }
 
-/// Daemon'a D-Bus proxy.
+/// D-Bus proxy for the daemon.
 struct DaemonProxy {
     conn: Connection,
 }
@@ -63,7 +63,7 @@ impl DaemonProxy {
     async fn connect() -> Result<Self> {
         let conn = Connection::session()
             .await
-            .map_err(|e| anyhow!("D-Bus baglantisi kurulamadi: {e}. Daemon calisiyor mu? (systemctl --user status blacksharkd)"))?;
+            .map_err(|e| anyhow!("could not connect to D-Bus: {e}. Is the daemon running? (systemctl --user status blacksharkd)"))?;
         Ok(Self { conn })
     }
 
@@ -81,13 +81,15 @@ impl DaemonProxy {
                 args,
             )
             .await
-            .map_err(|e| anyhow!("daemon cagrisi basarisiz ({method}): {e}"))?;
+            .map_err(|e| anyhow!("daemon call failed ({method}): {e}"))?;
         Ok(())
     }
 
     async fn get_property<T>(&self, name: &str) -> Result<T>
     where
-        T: for<'a> zbus::zvariant::Type + serde::de::DeserializeOwned + TryFrom<zbus::zvariant::OwnedValue>,
+        T: for<'a> zbus::zvariant::Type
+            + serde::de::DeserializeOwned
+            + TryFrom<zbus::zvariant::OwnedValue>,
         <T as TryFrom<zbus::zvariant::OwnedValue>>::Error: Into<zbus::Error>,
     {
         let proxy = zbus::Proxy::new(
@@ -100,7 +102,7 @@ impl DaemonProxy {
         let v = proxy
             .get_property::<T>(name)
             .await
-            .map_err(|e| anyhow!("property okunamadi ({name}): {e}"))?;
+            .map_err(|e| anyhow!("could not read property ({name}): {e}"))?;
         Ok(v)
     }
 }
@@ -115,25 +117,22 @@ async fn main() -> Result<()> {
             let battery: i32 = daemon.get_property("Battery").await.unwrap_or(-1);
             let connected: bool = daemon.get_property("Connected").await.unwrap_or(false);
             if json {
-                println!(
-                    "{{\"connected\":{},\"battery\":{}}}",
-                    connected, battery
-                );
+                println!("{{\"connected\":{},\"battery\":{}}}", connected, battery);
             } else {
-                println!("Bagli   : {}", if connected { "evet" } else { "hayir" });
+                println!("Connected : {}", if connected { "yes" } else { "no" });
                 if battery >= 0 {
-                    println!("Batarya : %{battery}");
+                    println!("Battery   : {battery}%");
                 } else {
-                    println!("Batarya : bilinmiyor");
+                    println!("Battery   : unknown");
                 }
             }
         }
         Command::Battery => {
             let battery: i32 = daemon.get_property("Battery").await.unwrap_or(-1);
             if battery >= 0 {
-                println!("Batarya: %{battery}");
+                println!("Battery: {battery}%");
             } else {
-                println!("Batarya: bilinmiyor");
+                println!("Battery: unknown");
             }
         }
         Command::EqPreset { name } => {
@@ -142,7 +141,7 @@ async fn main() -> Result<()> {
         }
         Command::Eq { bands } => {
             if bands.len() != 10 {
-                return Err(anyhow!("10 bant gerekli, {} verildi", bands.len()));
+                return Err(anyhow!("10 bands are required; received {}", bands.len()));
             }
             daemon.call("SetEq", &(bands.clone(),)).await?;
             println!("Custom EQ -> {:?}", bands);
@@ -158,7 +157,7 @@ async fn main() -> Result<()> {
         }
         Command::Sleep { minutes } => {
             daemon.call("SetSleep", &(minutes,)).await?;
-            println!("Sleep timer -> {minutes} dk");
+            println!("Sleep timer -> {minutes} min");
         }
         Command::PowerSave { state } => {
             let on = parse_on_off(&state)?;
@@ -167,7 +166,7 @@ async fn main() -> Result<()> {
         }
         Command::Apply => {
             daemon.call("Apply", &()).await?;
-            println!("Config uygulandi");
+            println!("Configuration applied");
         }
     }
 

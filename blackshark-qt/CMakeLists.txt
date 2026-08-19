@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-# Qt6 tercih; yoksa Qt5'e dus.
+# Prefer Qt6; fall back to Qt5.
 find_package(Qt6 COMPONENTS Widgets DBus Svg QUIET)
 if (Qt6_FOUND)
     set(QT_LIBS Qt6::Widgets Qt6::DBus Qt6::Svg)

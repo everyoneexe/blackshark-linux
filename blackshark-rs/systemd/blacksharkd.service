@@ -1,6 +1,5 @@
 [Unit]
 Description=BlackShark headset daemon (HID owner + D-Bus service)
-Documentation=https://github.com/RiskRunner0/blackshark-linux
 
 [Service]
 Type=dbus
