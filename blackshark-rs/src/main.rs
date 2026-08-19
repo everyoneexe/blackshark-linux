@@ -88,7 +88,7 @@ impl DaemonProxy {
     async fn get_property<T>(&self, name: &str) -> Result<T>
     where
         T: for<'a> zbus::zvariant::Type + serde::de::DeserializeOwned + TryFrom<zbus::zvariant::OwnedValue>,
-        <T as TryFrom<zbus::zvariant::OwnedValue>>::Error: std::fmt::Display,
+        <T as TryFrom<zbus::zvariant::OwnedValue>>::Error: Into<zbus::Error>,
     {
         let proxy = zbus::Proxy::new(
             &self.conn,
