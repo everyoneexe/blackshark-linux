@@ -1,0 +1,19 @@
+# Rust
+/blackshark-rs/target/
+**/*.rs.bk
+
+# Qt / CMake
+/blackshark-qt/build/
+*.o
+*.moc
+moc_*.cpp
+qrc_*.cpp
+*.user
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

@@ -1,0 +1,9 @@
+# Keep shell scripts and Linux config files LF so they work on Linux.
+*.sh        text eol=lf
+*.rules     text eol=lf
+*.service   text eol=lf
+*.desktop   text eol=lf
+
+# Binary captures
+*.pcap      binary
+*.svg       text

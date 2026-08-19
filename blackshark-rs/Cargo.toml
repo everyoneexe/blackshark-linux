@@ -1,0 +1,29 @@
+[package]
+name = "blackshark"
+version = "0.1.0"
+edition = "2021"
+description = "Razer BlackShark V3 X HyperSpeed (Xbox) control tool + daemon for Linux"
+license = "MIT"
+
+[[bin]]
+name = "blackshark"
+path = "src/main.rs"
+
+[[bin]]
+name = "blacksharkd"
+path = "src/daemon.rs"
+
+[dependencies]
+hidapi = "2.6"
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+zbus = "4.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
+directories = "5.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

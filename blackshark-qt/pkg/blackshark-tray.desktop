@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=BlackShark Tray
+Comment=Razer BlackShark V3 X system tray
+Exec=blackshark-tray
+Icon=audio-headset
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+X-GNOME-Autostart-enabled=true

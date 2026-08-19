@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Duz kulaklik ikonu (headset) -->
+  <g fill="none" stroke="currentColor" stroke-width="8"
+     stroke-linecap="round" stroke-linejoin="round">
+    <!-- Headband (ust kemer) -->
+    <path d="M 24 72 L 24 60 A 40 40 0 0 1 104 60 L 104 72" />
+    <!-- Sol kulaklik (ear cup) -->
+    <rect x="16" y="70" width="20" height="34" rx="8" fill="currentColor" stroke="none"/>
+    <!-- Sag kulaklik -->
+    <rect x="92" y="70" width="20" height="34" rx="8" fill="currentColor" stroke="none"/>
+    <!-- Mikrofon kolu -->
+    <path d="M 92 92 Q 74 108 60 108" />
+    <circle cx="56" cy="108" r="5" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

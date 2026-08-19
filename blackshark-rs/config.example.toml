@@ -1,0 +1,25 @@
+# blackshark example config
+# Location: ~/.config/blackshark/config.toml
+#
+# Only set what you want; the rest can be removed.
+# Running `blackshark <command>` updates the corresponding field automatically.
+# The daemon re-applies everything here on connect and boot.
+
+# EQ preset: "default" | "game" | "movie" | "music"
+eq_preset = "game"
+
+# Custom EQ (instead of a preset). 10 bands in dB (-6..6):
+# order: 31Hz 63 125 250 500 1k 2k 4k 8k 16k
+# eq = [1, 2, 3, 4, 5, 6, -1, -2, -3, -4]
+
+# Mic monitoring / sidetone (0..15)
+sidetone = 8
+
+# Mic noise cancellation
+noise_cancel = true
+
+# Sleep timer (minutes)
+sleep_minutes = 30
+
+# Power saving
+power_save = true

@@ -1,0 +1,15 @@
+# Razer BlackShark V3 X HyperSpeed (Xbox) - udev kurali
+#
+# Kurulum:
+#   sudo cp 99-blackshark.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Bu kural hidraw cihazina root'suz erisim verir; boylece daemon
+# (blacksharkd, user servisi) cihaza sudo olmadan erisebilir.
+#
+# Kullanicinin 'plugdev' grubunda olmasi gerekir. Yoksa:
+#   sudo usermod -aG plugdev $USER   (ardindan yeniden giris)
+# uaccess tag'i cogu modern masaustunde oturum acan kullaniciya izin verir.
+
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0a5b", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0a5b", MODE="0660", GROUP="plugdev", TAG+="uaccess"
