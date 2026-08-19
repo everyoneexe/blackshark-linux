@@ -37,12 +37,18 @@ mkdir -p "$HOME/.config/systemd/user"
 install -m0644 "$RS_DIR/systemd/blacksharkd.service" \
     "$HOME/.config/systemd/user/blacksharkd.service"
 systemctl --user daemon-reload
-systemctl --user enable --now blacksharkd.service
+systemctl --user enable blacksharkd.service
+systemctl --user restart blacksharkd.service
 
 echo ">> Tray autostart..."
 mkdir -p "$HOME/.config/autostart"
 install -m0644 "$QT_DIR/pkg/blackshark-tray.desktop" \
     "$HOME/.config/autostart/blackshark-tray.desktop"
+
+if ! pgrep -x blackshark-tray >/dev/null; then
+    echo ">> Starting tray..."
+    nohup "$BIN_DIR/blackshark-tray" >/dev/null 2>&1 &
+fi
 
 echo
 echo "Installation complete."

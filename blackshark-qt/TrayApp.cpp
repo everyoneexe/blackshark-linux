@@ -1,14 +1,10 @@
 #include "TrayApp.h"
-#include "SettingsWindow.h"
+#include "EqDialog.h"
 
 #include <QApplication>
 #include <QIcon>
 #include <QActionGroup>
-#include <QWidgetAction>
-#include <QSlider>
-#include <QLabel>
-#include <QVBoxLayout>
-#include <QWidget>
+#include <QSignalBlocker>
 
 TrayApp::TrayApp(HeadsetClient* client, QObject* parent)
     : QObject(parent), m_client(client) {
@@ -26,16 +22,12 @@ TrayApp::TrayApp(HeadsetClient* client, QObject* parent)
     updateTooltip();
     m_tray->show();
 
-    // Open Settings on left click as well.
-    connect(m_tray, &QSystemTrayIcon::activated, this,
-            [this](QSystemTrayIcon::ActivationReason reason) {
-                if (reason == QSystemTrayIcon::Trigger) openSettings();
-            });
-
     connect(m_client, &HeadsetClient::batteryChanged, this,
             &TrayApp::onBatteryChanged);
     connect(m_client, &HeadsetClient::connectedChanged, this,
             &TrayApp::onConnectedChanged);
+    connect(m_client, &HeadsetClient::settingsChanged, this, &TrayApp::syncSettings);
+    syncSettings();
 }
 
 void TrayApp::buildMenu() {
@@ -54,63 +46,67 @@ void TrayApp::buildMenu() {
     for (const QString& p : presets) {
         QAction* a = eqMenu->addAction(p);
         a->setCheckable(true);
+        a->setData(p);
         eqGroup->addAction(a);
+        m_eqPresetActions.append(a);
         connect(a, &QAction::triggered, this, [this, p]() {
             m_client->setEqPreset(p);
         });
     }
+    eqMenu->addSeparator();
+    m_savedProfilesMenu = eqMenu->addMenu("Saved profiles");
+    connect(m_savedProfilesMenu, &QMenu::aboutToShow, this, &TrayApp::populateSavedProfiles);
+    QAction* customEq = eqMenu->addAction("Custom EQ…");
+    connect(customEq, &QAction::triggered, this, &TrayApp::openEqDialog);
 
-    // --- Sidetone submenu (embedded slider) ---
+    // StatusNotifier menus do not support embedded QWidget controls reliably.
+    // Use direct, checkable levels instead so every compositor renders them.
     QMenu* sideMenu = m_menu->addMenu("Sidetone");
-    {
-        auto* w = new QWidget();
-        auto* lay = new QVBoxLayout(w);
-        lay->setContentsMargins(8, 4, 8, 4);
-        auto* lbl = new QLabel("Level: 0", w);
-        auto* slider = new QSlider(Qt::Horizontal, w);
-        slider->setRange(0, 15);
-        lay->addWidget(lbl);
-        lay->addWidget(slider);
-        connect(slider, &QSlider::valueChanged, w,
-                [lbl](int v) { lbl->setText(QString("Level: %1").arg(v)); });
-        connect(slider, &QSlider::sliderReleased, this,
-                [this, slider]() { m_client->setSidetone(slider->value()); });
-        auto* wa = new QWidgetAction(this);
-        wa->setDefaultWidget(w);
-        sideMenu->addAction(wa);
+    auto* sidetoneGroup = new QActionGroup(this);
+    sidetoneGroup->setExclusive(true);
+    for (int level = 0; level <= 15; ++level) {
+        QAction* action = sideMenu->addAction(level == 0 ? "Off" : QString::number(level));
+        action->setCheckable(true);
+        action->setData(level);
+        sidetoneGroup->addAction(action);
+        m_sidetoneActions.append(action);
+        connect(action, &QAction::triggered, this,
+                [this, level]() { m_client->setSidetone(level); });
     }
 
     // --- Noise cancellation toggle ---
-    QAction* nc = m_menu->addAction("Noise cancellation");
-    nc->setCheckable(true);
-    connect(nc, &QAction::toggled, this,
+    m_noiseCancelAction = m_menu->addAction("Noise cancellation");
+    m_noiseCancelAction->setCheckable(true);
+    connect(m_noiseCancelAction, &QAction::toggled, this,
             [this](bool on) { m_client->setNoiseCancel(on); });
 
-    // --- Power save toggle ---
-    QAction* ps = m_menu->addAction("Power saving");
-    ps->setCheckable(true);
-    connect(ps, &QAction::toggled, this,
+    // --- Power-saving controls ---
+    QMenu* powerMenu = m_menu->addMenu("Power");
+    m_powerSaveAction = powerMenu->addAction("Battery saver");
+    m_powerSaveAction->setCheckable(true);
+    connect(m_powerSaveAction, &QAction::toggled, this,
             [this](bool on) { m_client->setPowerSave(on); });
 
-    // --- Sleep submenu ---
-    QMenu* sleepMenu = m_menu->addMenu("Sleep");
+    powerMenu->addSeparator();
+    QAction* timeoutLabel = powerMenu->addAction("Turn off after:");
+    timeoutLabel->setEnabled(false);
     auto* sleepGroup = new QActionGroup(this);
     sleepGroup->setExclusive(true);
     const QList<QPair<QString, int>> sleeps = {
-        {"Off", 0}, {"15 min", 15}, {"30 min", 30}, {"45 min", 45}, {"60 min", 60}};
+        {"Never", 0}, {"15 minutes", 15}, {"30 minutes", 30},
+        {"45 minutes", 45}, {"60 minutes", 60}};
     for (const auto& s : sleeps) {
-        QAction* a = sleepMenu->addAction(s.first);
+        QAction* a = powerMenu->addAction(s.first);
         a->setCheckable(true);
+        a->setData(s.second);
         sleepGroup->addAction(a);
+        m_sleepActions.append(a);
         int mins = s.second;
         connect(a, &QAction::triggered, this,
                 [this, mins]() { m_client->setSleep(mins); });
     }
 
     m_menu->addSeparator();
-    QAction* settings = m_menu->addAction("Settings...");
-    connect(settings, &QAction::triggered, this, &TrayApp::openSettings);
-
     QAction* refresh = m_menu->addAction("Refresh battery");
     connect(refresh, &QAction::triggered, this,
             [this]() { m_client->refreshBattery(); });
@@ -120,23 +116,54 @@ void TrayApp::buildMenu() {
     connect(quit, &QAction::triggered, qApp, &QApplication::quit);
 }
 
-void TrayApp::openSettings() {
-    if (!m_settings) {
-        m_settings = new SettingsWindow(m_client);
+void TrayApp::openEqDialog() {
+    if (!m_eqDialog) {
+        m_eqDialog = new EqDialog(m_client);
     }
-    m_settings->show();
-    m_settings->raise();
-    m_settings->activateWindow();
+    m_eqDialog->show();
+    m_eqDialog->raise();
+    m_eqDialog->activateWindow();
 }
 
 void TrayApp::updateTooltip() {
     int b = m_client->battery();
     bool c = m_client->connected();
-    QString batt = (b >= 0) ? QString("%%1").arg(b) : "?";
-    m_tray->setToolTip(QString("BlackShark V3 X\n%1  |  Battery: %2")
+    QString batt = (b >= 0) ? QString("%1%").arg(b) : "?";
+    m_tray->setToolTip(QString("%1  |  Battery: %2")
                            .arg(c ? "Connected" : "Disconnected", batt));
     m_batteryAction->setText(
         c ? QString("Battery: %1").arg(batt) : QString("Disconnected"));
+}
+
+void TrayApp::syncSettings() {
+    for (QAction* action : m_eqPresetActions) {
+        action->setChecked(action->data().toString() == m_client->eqPreset());
+    }
+    for (QAction* action : m_sidetoneActions) {
+        action->setChecked(action->data().toInt() == m_client->sidetone());
+    }
+    for (QAction* action : m_sleepActions) {
+        action->setChecked(action->data().toInt() == m_client->sleepMinutes());
+    }
+    const QSignalBlocker noiseCancelBlocker(m_noiseCancelAction);
+    const QSignalBlocker powerSaveBlocker(m_powerSaveAction);
+    m_noiseCancelAction->setChecked(m_client->noiseCancel());
+    m_powerSaveAction->setChecked(m_client->powerSave());
+}
+
+void TrayApp::populateSavedProfiles() {
+    m_savedProfilesMenu->clear();
+    const QStringList profiles = m_client->eqProfiles();
+    if (profiles.isEmpty()) {
+        QAction* empty = m_savedProfilesMenu->addAction("No saved profiles");
+        empty->setEnabled(false);
+        return;
+    }
+    for (const QString& name : profiles) {
+        QAction* action = m_savedProfilesMenu->addAction(name);
+        connect(action, &QAction::triggered, this,
+                [this, name]() { m_client->applyEqProfile(name); });
+    }
 }
 
 void TrayApp::onBatteryChanged(int) { updateTooltip(); }

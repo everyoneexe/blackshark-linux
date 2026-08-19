@@ -5,6 +5,7 @@
 //! `apply` re-sends the saved settings to the device. The daemon calls `apply`
 //! on startup and on reconnect.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -40,6 +41,8 @@ pub struct Config {
     pub sleep_minutes: Option<u16>,
     /// Power saving.
     pub power_save: Option<bool>,
+    /// Named custom EQ profiles. Each value contains the 10 dB bands.
+    pub eq_profiles: BTreeMap<String, Vec<i8>>,
 }
 
 impl Config {

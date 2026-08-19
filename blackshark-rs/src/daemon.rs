@@ -28,7 +28,7 @@ use device::Headset;
 use protocol::{self as proto, EqPreset};
 
 /// Battery polling interval.
-const BATTERY_POLL: Duration = Duration::from_secs(300); // 5 min
+const BATTERY_POLL: Duration = Duration::from_secs(3);
 
 /// Shared daemon state.
 struct Inner {
@@ -100,6 +100,147 @@ impl HeadsetService {
         self.inner.lock().await.connected
     }
 
+    /// Active EQ profile name. `custom` means a manually edited band curve.
+    #[zbus(property)]
+    async fn eq_preset(&self) -> String {
+        let g = self.inner.lock().await;
+        g.config.eq_preset.clone().unwrap_or_else(|| {
+            if g.config.eq.is_some() {
+                "custom".into()
+            } else {
+                "default".into()
+            }
+        })
+    }
+
+    /// Saved custom EQ bands as a comma-separated string. An empty string means
+    /// a device preset is active. A string avoids client-specific D-Bus array
+    /// marshalling issues while keeping the property easy to consume.
+    #[zbus(property)]
+    async fn eq_bands(&self) -> String {
+        self.inner
+            .lock()
+            .await
+            .config
+            .eq
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|band| band.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Saved sidetone level, 0..15.
+    #[zbus(property)]
+    async fn sidetone(&self) -> u32 {
+        self.inner.lock().await.config.sidetone.unwrap_or(0) as u32
+    }
+
+    /// Saved microphone noise-cancellation state.
+    #[zbus(property)]
+    async fn noise_cancel(&self) -> bool {
+        self.inner.lock().await.config.noise_cancel.unwrap_or(false)
+    }
+
+    /// Saved sleep timer in minutes.
+    #[zbus(property)]
+    async fn sleep(&self) -> u32 {
+        self.inner.lock().await.config.sleep_minutes.unwrap_or(0) as u32
+    }
+
+    /// Saved power-saving state.
+    #[zbus(property)]
+    async fn power_save(&self) -> bool {
+        self.inner.lock().await.config.power_save.unwrap_or(false)
+    }
+
+    /// List saved custom EQ profile names.
+    async fn list_eq_profiles(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .await
+            .config
+            .eq_profiles
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// Return a profile as comma-separated dB values for D-Bus clients.
+    async fn get_eq_profile(&self, name: String) -> zbus::fdo::Result<String> {
+        let g = self.inner.lock().await;
+        let bands =
+            g.config.eq_profiles.get(&name).ok_or_else(|| {
+                zbus::fdo::Error::InvalidArgs(format!("unknown EQ profile: {name}"))
+            })?;
+        Ok(bands
+            .iter()
+            .map(|band| band.to_string())
+            .collect::<Vec<_>>()
+            .join(","))
+    }
+
+    /// Save a named custom EQ profile without changing the active EQ.
+    async fn save_eq_profile(&self, name: String, bands: Vec<i32>) -> zbus::fdo::Result<()> {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 48 {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "profile name must contain 1 to 48 characters".into(),
+            ));
+        }
+        if bands.len() != 10 {
+            return Err(zbus::fdo::Error::InvalidArgs(
+                "10 bands are required".into(),
+            ));
+        }
+        let values = bands
+            .iter()
+            .map(|band| (*band).clamp(-6, 6) as i8)
+            .collect();
+        {
+            let mut g = self.inner.lock().await;
+            g.config.eq_profiles.insert(name.to_string(), values);
+        }
+        self.save_config().await;
+        Ok(())
+    }
+
+    /// Delete a named custom EQ profile.
+    async fn delete_eq_profile(&self, name: String) -> zbus::fdo::Result<()> {
+        let mut g = self.inner.lock().await;
+        if g.config.eq_profiles.remove(&name).is_none() {
+            return Err(zbus::fdo::Error::InvalidArgs(format!(
+                "unknown EQ profile: {name}"
+            )));
+        }
+        drop(g);
+        self.save_config().await;
+        Ok(())
+    }
+
+    /// Apply a saved custom EQ profile to the device.
+    async fn apply_eq_profile(&self, name: String) -> zbus::fdo::Result<()> {
+        let bands = {
+            let g = self.inner.lock().await;
+            g.config.eq_profiles.get(&name).cloned().ok_or_else(|| {
+                zbus::fdo::Error::InvalidArgs(format!("unknown EQ profile: {name}"))
+            })?
+        };
+        let mut arr = [0i8; 10];
+        arr.copy_from_slice(&bands);
+        self.send(&proto::eq_custom(&arr, 0))
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        {
+            let mut g = self.inner.lock().await;
+            g.config.eq_preset = None;
+            g.config.eq = Some(bands);
+        }
+        self.save_config().await;
+        Ok(())
+    }
+
     /// EQ preset: "default" | "game" | "movie" | "music"
     async fn set_eq_preset(&self, name: String) -> zbus::fdo::Result<()> {
         let p = EqPreset::from_name(&name)
@@ -132,6 +273,7 @@ impl HeadsetService {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         {
             let mut g = self.inner.lock().await;
+            g.config.eq_preset = None;
             g.config.eq = Some(arr.to_vec());
         }
         self.save_config().await;
@@ -212,15 +354,26 @@ impl HeadsetService {
             return Ok(-1);
         }
         let mut g = self.inner.lock().await;
-        if let Some(hs) = g.headset.as_ref() {
-            if let Ok(resp) = hs.query(&proto::battery_query(0)) {
-                if let Some(level) = proto::parse_battery(&resp) {
-                    g.battery = level as i32;
-                    return Ok(level as i32);
-                }
+        let response = match g.headset.as_ref() {
+            Some(hs) => hs.query(&proto::battery_query(0)),
+            None => return Ok(-1),
+        };
+        match response.ok().and_then(|resp| proto::parse_battery(&resp)) {
+            Some(level) => {
+                g.battery = level as i32;
+                g.connected = true;
+                Ok(level as i32)
+            }
+            None => {
+                // The USB dongle can remain present after the headset itself is
+                // switched off. An invalid or absent battery reply means the
+                // radio headset is unavailable, not that it has 255% charge.
+                g.headset = None;
+                g.connected = false;
+                g.battery = -1;
+                Ok(-1)
             }
         }
-        Ok(g.battery)
     }
 }
 
@@ -264,17 +417,7 @@ async fn main() -> Result<()> {
         .await?;
     tokio::spawn(async move {
         loop {
-            poll_service.ensure_device().await;
-            {
-                let mut g = poll_service.inner.lock().await;
-                if let Some(hs) = g.headset.as_ref() {
-                    if let Ok(resp) = hs.query(&proto::battery_query(0)) {
-                        if let Some(level) = proto::parse_battery(&resp) {
-                            g.battery = level as i32;
-                        }
-                    }
-                }
-            }
+            let _ = poll_service.refresh_battery().await;
             // Property-changed signals (zbus 4.x).
             let ctxt = iface_ref.signal_context();
             let iface = iface_ref.get().await;

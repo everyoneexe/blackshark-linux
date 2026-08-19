@@ -19,8 +19,7 @@ add_executable(blackshark-tray
     main.cpp
     HeadsetClient.cpp
     TrayApp.cpp
-    SettingsWindow.cpp
-    EqGraph.cpp
+    EqDialog.cpp
     resources.qrc
 )
 

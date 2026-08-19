@@ -138,7 +138,11 @@ pub fn battery_query(tid: u8) -> [u8; REPORT_LEN] {
 /// Extracts the percentage from a battery response.
 pub fn parse_battery(resp: &[u8]) -> Option<u8> {
     // Response layout: .. 02 07 80 00 VV -> report[10] = VV.
-    resp.get(10).copied()
+    if resp.len() <= 10 || resp[6] != 0x02 || resp[7] != 0x07 || resp[8] != 0x80 {
+        return None;
+    }
+    let level = resp[10];
+    (level <= 100).then_some(level)
 }
 
 #[cfg(test)]
@@ -214,6 +218,8 @@ mod tests {
         response[9] = 0x00;
         response[10] = 92;
         assert_eq!(parse_battery(&response), Some(92));
+        response[10] = u8::MAX;
+        assert_eq!(parse_battery(&response), None);
     }
 
     #[test]

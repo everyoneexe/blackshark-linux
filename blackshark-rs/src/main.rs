@@ -105,6 +105,20 @@ impl DaemonProxy {
             .map_err(|e| anyhow!("could not read property ({name}): {e}"))?;
         Ok(v)
     }
+
+    async fn refresh_battery(&self) -> Result<i32> {
+        let proxy = zbus::Proxy::new(
+            &self.conn,
+            "net.blackshark1",
+            "/net/blackshark1/Headset",
+            "net.blackshark1.Headset",
+        )
+        .await?;
+        proxy
+            .call("RefreshBattery", &())
+            .await
+            .map_err(|e| anyhow!("could not refresh battery: {e}"))
+    }
 }
 
 #[tokio::main]
@@ -114,7 +128,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Status { json } => {
-            let battery: i32 = daemon.get_property("Battery").await.unwrap_or(-1);
+            let battery = daemon.refresh_battery().await.unwrap_or(-1);
             let connected: bool = daemon.get_property("Connected").await.unwrap_or(false);
             if json {
                 println!("{{\"connected\":{},\"battery\":{}}}", connected, battery);
@@ -128,7 +142,7 @@ async fn main() -> Result<()> {
             }
         }
         Command::Battery => {
-            let battery: i32 = daemon.get_property("Battery").await.unwrap_or(-1);
+            let battery = daemon.refresh_battery().await.unwrap_or(-1);
             if battery >= 0 {
                 println!("Battery: {battery}%");
             } else {
