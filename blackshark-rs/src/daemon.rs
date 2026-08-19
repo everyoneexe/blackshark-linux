@@ -12,6 +12,7 @@
 //!   path    : /net/blackshark1/Headset
 //!   iface   : net.blackshark1.Headset
 
+mod bluez;
 mod config;
 mod device;
 mod protocol;
@@ -47,19 +48,29 @@ struct HeadsetService {
 impl HeadsetService {
     /// Tries to open the device if it is not already available.
     async fn ensure_device(&self) -> bool {
-        let mut g = self.inner.lock().await;
-        if g.headset.is_some() {
+        if self.inner.lock().await.headset.is_some() {
             return true;
         }
+
         match Headset::open() {
             Ok(hs) => {
+                let mut g = self.inner.lock().await;
                 g.headset = Some(hs);
                 g.connected = true;
                 true
             }
             Err(_) => {
-                g.connected = false;
-                false
+                if let Some(status) = bluez::connected_status().await {
+                    let mut g = self.inner.lock().await;
+                    g.connected = true;
+                    g.battery = status.battery.map(i32::from).unwrap_or(-1);
+                    true
+                } else {
+                    let mut g = self.inner.lock().await;
+                    g.connected = false;
+                    g.battery = -1;
+                    false
+                }
             }
         }
     }
@@ -354,6 +365,11 @@ impl HeadsetService {
             return Ok(-1);
         }
         let mut g = self.inner.lock().await;
+        if g.headset.is_none() {
+            // A classic Bluetooth connection has no HID feature-report channel.
+            // `ensure_device` already read its BlueZ battery property.
+            return Ok(g.battery);
+        }
         let response = match g.headset.as_ref() {
             Some(hs) => hs.query(&proto::battery_query(0)),
             None => return Ok(-1),
@@ -366,8 +382,18 @@ impl HeadsetService {
             }
             None => {
                 // The USB dongle can remain present after the headset itself is
-                // switched off. An invalid or absent battery reply means the
-                // radio headset is unavailable, not that it has 255% charge.
+                // switched off or Bluetooth mode is selected. Prefer the BlueZ
+                // battery source when the headset is connected there.
+                drop(g);
+                if let Some(status) = bluez::connected_status().await {
+                    let mut g = self.inner.lock().await;
+                    g.headset = None;
+                    g.connected = true;
+                    g.battery = status.battery.map(i32::from).unwrap_or(-1);
+                    return Ok(g.battery);
+                }
+
+                let mut g = self.inner.lock().await;
                 g.headset = None;
                 g.connected = false;
                 g.battery = -1;

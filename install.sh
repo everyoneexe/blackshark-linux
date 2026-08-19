@@ -40,20 +40,26 @@ systemctl --user daemon-reload
 systemctl --user enable blacksharkd.service
 systemctl --user restart blacksharkd.service
 
-echo ">> Tray autostart..."
-mkdir -p "$HOME/.config/autostart"
-install -m0644 "$QT_DIR/pkg/blackshark-tray.desktop" \
-    "$HOME/.config/autostart/blackshark-tray.desktop"
+echo ">> Installing systemd user service (tray)..."
+install -m0644 "$QT_DIR/systemd/blackshark-tray.service" \
+    "$HOME/.config/systemd/user/blackshark-tray.service"
+# Migrate installations from the old desktop-autostart entry so only systemd
+# launches the tray after this install.
+rm -f "$HOME/.config/autostart/blackshark-tray.desktop"
+systemctl --user daemon-reload
+systemctl --user enable blackshark-tray.service
 
-if ! pgrep -x blackshark-tray >/dev/null; then
-    echo ">> Starting tray..."
-    nohup "$BIN_DIR/blackshark-tray" >/dev/null 2>&1 &
+if pgrep -x blackshark-tray >/dev/null; then
+    echo ">> Tray is already running; systemd will manage it after the next login."
+else
+    echo ">> Starting tray service..."
+    systemctl --user start blackshark-tray.service
 fi
 
 echo
 echo "Installation complete."
 echo "  Daemon  : systemctl --user status blacksharkd"
 echo "  CLI     : blackshark status"
-echo "  Tray    : blackshark-tray &   (starts automatically at the next login)"
+echo "  Tray    : systemctl --user status blackshark-tray"
 echo
 echo "Note: access is granted through the `users` group and uaccess."

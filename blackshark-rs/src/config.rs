@@ -49,13 +49,24 @@ impl Config {
     /// Loads from the specified path; returns an empty configuration if absent.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Ok(Self::default());
+            return Ok(Self::new_install_defaults());
         }
         let text = fs::read_to_string(path)
             .with_context(|| format!("could not read configuration: {}", path.display()))?;
         let cfg: Config = toml::from_str(&text)
             .with_context(|| format!("could not parse configuration: {}", path.display()))?;
         Ok(cfg)
+    }
+
+    /// Defaults used before a user configuration file exists.
+    ///
+    /// Keeping this separate from `Default` preserves the meaning of missing
+    /// fields in existing configuration files.
+    fn new_install_defaults() -> Self {
+        Self {
+            eq_preset: Some("default".into()),
+            ..Self::default()
+        }
     }
 
     /// Writes atomically to disk (first to .tmp, then renames it).

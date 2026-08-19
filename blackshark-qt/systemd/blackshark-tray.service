@@ -1,0 +1,12 @@
+[Unit]
+Description=BlackShark headset tray
+Wants=blacksharkd.service
+After=blacksharkd.service graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/blackshark-tray
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -9,6 +9,11 @@ every command is byte-for-byte verified against what Synapse actually sends.
 Controls EQ presets, custom 10-band EQ, sidetone (mic monitoring), mic noise
 cancellation, sleep timer, power saving, and battery reading.
 
+> **Bluetooth limitation:** when the headset is paired to the PC over normal
+> Bluetooth, BlackShark can report connection status and battery only. The
+> headset does not expose its proprietary EQ, ANC, sidetone, or power-control BLE
+> endpoint to Linux. Use the HyperSpeed USB dongle for all device controls.
+
 ## Architecture
 
 ```
@@ -36,6 +41,8 @@ conflict.
 - **Sleep timer** — auto-off timeout in minutes
 - **Power saving** — on/off
 - **Battery** — percentage, polled every 5 minutes, pushed over D-Bus
+- **PC Bluetooth mode** — connection status and battery only; device controls
+  require the USB dongle
 - **Settings persist** — saved to `~/.config/blackshark/config.toml`, restored on
   reconnect and boot (the device firmware forgets most settings)
 - **System tray** — plain headset icon, battery %, quick toggles, EQ/sidetone submenus
@@ -62,8 +69,8 @@ conflict.
 ```
 
 This builds everything, installs the binaries to `~/.local/bin`, installs the
-udev rule (asks for `sudo`), enables the `blacksharkd` systemd user service, and
-adds the tray to autostart.
+udev rule (asks for `sudo`), and enables the `blacksharkd` and
+`blackshark-tray` systemd user services.
 
 If you are not in the `plugdev` group:
 
@@ -82,11 +89,12 @@ systemctl --user status blacksharkd
 # 2. Verify the headset is detected
 blackshark status
 
-# 3. Start the tray (auto-starts on next login)
-blackshark-tray &
+# 3. Check the tray service
+systemctl --user status blackshark-tray
 ```
 
-The tray icon shows a plain headset. Left-click opens Settings; right-click opens
+The tray service starts automatically at login. The tray icon shows a plain
+headset. Left-click opens Settings; right-click opens
 the menu with battery %, EQ presets, sidetone, noise cancellation, power saving,
 sleep timer, and daemon controls.
 
@@ -126,7 +134,7 @@ blackshark-qt/                 Qt/C++ tray + GUI
   TrayApp.{h,cpp}              system tray
   SettingsWindow.{h,cpp}       settings window
   assets/headset.svg           tray icon
-  pkg/blackshark-tray.desktop  autostart entry
+  systemd/blackshark-tray.service  systemd user unit
   CMakeLists.txt
 install.sh                     one-shot build + install
 PROTOCOL.md                    full reverse-engineered protocol documentation

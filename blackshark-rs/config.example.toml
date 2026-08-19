@@ -6,7 +6,7 @@
 # The daemon re-applies everything here on connect and boot.
 
 # EQ preset: "default" | "game" | "movie" | "music"
-eq_preset = "game"
+eq_preset = "default"
 
 # Custom EQ (instead of a preset). 10 bands in dB (-6..6):
 # order: 31Hz 63 125 250 500 1k 2k 4k 8k 16k
